@@ -198,7 +198,7 @@ h1 {
 st.markdown("""
 <style>
 .stApp {
-    background-color: #FFE6F2;
+    background-color: #D84565;
 }
 
 /* Force-override Streamlit title color */
