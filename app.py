@@ -17,7 +17,7 @@ def get_g_service():
 SPREADSHEET_ID = "1FNotGZKUXw3iU6qaqKyadRaQMYSQr65KSIonlwH-CZE"
 SHEET_NAME = "Sheet1"
 
-# ---------- IMPROVED PARSING LOGIC ----------
+# ---------- ADVANCED PARSING ----------
 
 def extract_date(caption):
     month_map = {
@@ -49,7 +49,7 @@ def parse_all_fields(caption, url):
         event_title = bold_match.group(1).strip()
     elif lines:
         for l in lines:
-            if not l.startswith("#") and len(l) > 3:
+            if not l.startswith("#") and len(l) > 5:
                 event_title = l[:100]
                 break
 
@@ -64,17 +64,20 @@ def parse_all_fields(caption, url):
             location = re.sub(r'(?i)location:|lokasi:|at |📍', '', l).strip()
             break
 
-    # 5. REGISTRATION LINK (FIXED LOGIC)
+    # 5. REGISTRATION / PRICE LINK (COMPREHENSIVE FIX)
     reg_link = "-"
-    # Search for a URL that appears AFTER a registration keyword
-    # This pattern looks for (Keyword) -> (any text) -> (URL)
-    keyword_pattern = r"(?i)(?:link|htm|daftar|free|regis|tiket|ticket|biaya|pendaftaran).*?(https?://[^\s]+)"
+    # Check for "FREE" keywords specifically first
+    if any(free_word in caption.upper() for free_word in ["FREE", "GRATIS", "RP 0", "FREE ENTRY"]):
+        reg_link = "FREE / No Link Needed"
+
+    # Now look for actual URLs associated with registration keywords
+    keyword_pattern = r"(?i)(?:link|htm|daftar|regis|tiket|ticket|pendaftaran|gform|bit\.ly|form).*?(https?://[^\s]+)"
     link_match = re.search(keyword_pattern, caption, re.DOTALL)
     
     if link_match:
         reg_link = link_match.group(1)
-    else:
-        # Fallback: Just grab the first link found anywhere if no keyword matches
+    elif reg_link == "-":
+        # Final fallback: If no "FREE" found and no keyword-link found, grab the first URL
         any_link = re.search(r'(https?://[^\s]+)', caption)
         if any_link:
             reg_link = any_link.group(1)
@@ -101,7 +104,7 @@ with st.container():
 
 if st.button("🚀 Process & Save to Sheet"):
     if not caption_input or not url_input:
-        st.warning("Please fill in both fields! 🌸")
+        st.warning("Input caption and URL first! 🌸")
     else:
         service = get_g_service()
         if service:
@@ -116,7 +119,7 @@ if st.button("🚀 Process & Save to Sheet"):
                 
                 st.success("✅ Added to Google Sheet!")
                 st.table({
-                    "Field": ["Date", "Title", "Host", "Location", "Reg Link", "Source"],
+                    "Field": ["Date", "Title", "Host", "Location", "Reg/HTM", "Source"],
                     "Value": row_data
                 })
             except Exception as e:
