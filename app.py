@@ -6,8 +6,8 @@ from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-
 # ---------- GOOGLE AUTH ----------
+# Ensure your secrets are correctly set in Streamlit Cloud or .streamlit/secrets.toml
 credentials = service_account.Credentials.from_service_account_info(
     dict(st.secrets["google"])
 )
@@ -18,161 +18,53 @@ SHEET_NAME = "Sheet1"
 service = build("sheets", "v4", credentials=credentials)
 sheet = service.spreadsheets()
 
+# ---------- PARSING LOGIC ----------
 
-# ---------- STYLING ----------
-st.markdown("""
-<style>
-.stApp { background-color: #D84565; }
-
-h1, h1 span {
-    color:white !important;
-}
-
-.bdj-card {
-    background:white;
-    padding:18px;
-    border-radius:18px;
-    box-shadow:0 4px 12px rgba(214,51,132,0.18);
-    border:1px solid #FFD1E8;
-}
-
-.pink-button button{
-    background:#D84565!important;
-    color:white!important;
-    border-radius:12px!important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-
-# ---------- DATE ----------
 def extract_event_date(caption):
     month_map = {
-        "jan":"01","january":"01",
-        "feb":"02","february":"02","februari":"02",
-        "mar":"03","march":"03","maret":"03",
-        "apr":"04","april":"04",
-        "may":"05","mei":"05",
-        "jun":"06","june":"06",
-        "jul":"07","july":"07",
-        "aug":"08","august":"08","agustus":"08",
-        "sep":"09","september":"09",
-        "oct":"10","oktober":"10","october":"10",
-        "nov":"11","november":"11",
-        "dec":"12","december":"12","desember":"12",
+        "jan":"01","feb":"02","mar":"03","apr":"04","may":"05","jun":"06",
+        "jul":"07","aug":"08","sep":"09","oct":"10","nov":"11","dec":"12",
+        "mei":"05","agu":"08","okt":"10","des":"12"
     }
-
     caption = caption.lower()
-    patterns = [
-        r"(\d{1,2})\s+([a-z]+)\s+(\d{2,4})",
-        r"(\d{1,2})\s+([a-z]+)",
-        r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})"
-    ]
-
-    for pat in patterns:
-        m = re.search(pat, caption)
-        if not m:
-            continue
-
-        g = m.groups()
-
-        if len(g) == 3 and g[1].isalpha():
-            day = int(g[0])
-            month = month_map.get(g[1][:3], "01")
-            year = int(g[2])
-        elif len(g) == 2 and g[1].isalpha():
-            day = int(g[0])
-            month = month_map.get(g[1][:3], "01")
-            year = datetime.today().year
-        else:
-            day = int(g[0])
-            month = int(g[1])
-            year = int(g[2]) if len(g[2]) == 4 else 2000 + int(g[2])
-
-        return f"{year:04d}-{month}-{day:02d}"
-
+    # Pattern for "25 October 2023" or "25 Oct"
+    m = re.search(r"(\d{1,2})\s+([a-z]+)\s*(\d{2,4})?", caption)
+    if m:
+        day = int(m.group(1))
+        month_str = m.group(2)[:3]
+        month = month_map.get(month_str, "01")
+        year = m.group(3) if m.group(3) else datetime.today().year
+        return f"{year}-{month}-{day:02d}"
     return ""
 
-
-
-# ---------- TITLE ----------
 def extract_event_title(caption):
     lines = [l.strip() for l in caption.split("\n") if l.strip()]
-
+    if not lines: return "Untitled"
+    # Look for common headers
     for l in lines:
-        if re.search(r'\b(title|tema|theme)\b', l, re.IGNORECASE):
-            return re.sub(r'(?i)\b(title|tema|theme)\b[:\-–]*','',l).strip()
+        if any(x in l.lower() for x in ["tema:", "title:", "event:"]):
+            return re.sub(r'(?i).+?:', '', l).strip()
+    return lines[0][:100] # Fallback to first line
 
-    for l in lines:
-        m = re.search(r'\*\*(.+?)\*\*', l)
-        if m:
-            return m.group(1).strip()
-
-    for l in lines:
-        if l.isupper() and 4 <= len(l) <= 70:
-            return l
-
-    for l in lines:
-        if not l.startswith("#"):
-            return l
-
-    return ""
-
-
-
-# ---------- SCRAPE IG ----------
-def get_instagram_data(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    res = requests.get(url, headers=headers)
-
-    caption = ""
-
-    # Instagram now stores caption in ld+json script
-    match = re.search(
-        r'<script type="application/ld\+json">(.*?)</script>',
-        res.text,
-        re.S
-    )
-
-    if match:
-        try:
-            data = json.loads(match.group(1))
-            caption = data.get("caption", "")
-        except:
-            caption = ""
-
-    # ---------- extract fields ----------
+def process_caption(caption, url):
+    """Core logic to parse the text once it is obtained"""
     event_date = extract_event_date(caption)
     event_title = extract_event_title(caption)
-
+    
     handles = re.findall(r'@[\w.]+', caption)
-    penyelenggara = ", ".join(sorted(set(handles))) if handles else ""
-
+    penyelenggara = ", ".join(sorted(set(handles)))
+    
     location = ""
     for l in caption.split("\n"):
-        if "📍" in l:
+        if "📍" in l or "at " in l.lower():
             location = l.replace("📍","").strip()
             break
 
-    registration_link = ""
+    reg_link = ""
     link = re.search(r'(https?://[^\s]+)', caption)
-    if link:
-        registration_link = link.group(1)
+    if link: reg_link = link.group(1)
 
-    return [
-        event_date,
-        event_title,
-        penyelenggara,
-        location,
-        registration_link,
-        url
-    ]
-
-
+    return [event_date, event_title, penyelenggara, location, reg_link, url]
 
 # ---------- SAVE ----------
 def append_to_sheet(row):
@@ -183,39 +75,42 @@ def append_to_sheet(row):
         body={"values":[row]},
     ).execute()
 
-
-
 # ---------- UI ----------
-st.title("🩷 Bertemu Djakarta Temu Pekan")
+st.title("🩷 Bertemu Djakarta")
 
-st.markdown('<div class="bdj-card">', unsafe_allow_html=True)
-url = st.text_input("Paste Instagram link here 👇")
-st.markdown('</div>', unsafe_allow_html=True)
+tab1, tab2 = st.tabs(["Auto-Link", "Manual Paste"])
 
-st.markdown('<div class="pink-button">', unsafe_allow_html=True)
-clicked = st.button("Extract & Save to Sheet ✨")
-st.markdown('</div>', unsafe_allow_html=True)
+with tab1:
+    url = st.text_input("Paste Instagram link here 👇")
+    if st.button("Extract from Link ✨"):
+        # This part often fails because of IG bot protection
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        res = requests.get(url, headers=headers)
+        
+        if "login" in res.url:
+            st.error("Instagram blocked the automatic scraper. Please use the 'Manual Paste' tab!")
+        else:
+            # Attempt to find caption in the HTML
+            # Note: This is fragile as IG changes their HTML frequently
+            match = re.search(r'"edge_media_to_caption":\{"edges":\[\{"node":\{"text":"(.*?)"\}\}\]\}', res.text)
+            if match:
+                caption = match.group(1).encode().decode('unicode_escape')
+                row = process_caption(caption, url)
+                append_to_sheet(row)
+                st.success("Added to Sheet!")
+                st.write(row)
+            else:
+                st.warning("Couldn't find caption automatically. Use Manual Paste.")
 
-
-if clicked:
-    if not url:
-        st.warning("Masukin link dulu ya 🌷")
-    else:
-        try:
-            row = get_instagram_data(url)
+with tab2:
+    manual_url = st.text_input("Source URL")
+    manual_caption = st.text_area("Paste the caption text here directly")
+    if st.button("Parse & Save ✨"):
+        if manual_caption:
+            row = process_caption(manual_caption, manual_url)
             append_to_sheet(row)
-
-            st.success("💗 Success! Added to Google Sheet.")
-
-            st.write({
-                "Event Date": row[0],
-                "Event Title": row[1],
-                "Penyelenggara": row[2],
-                "Location": row[3],
-                "Registration Link": row[4],
-                "Source": row[5]
+            st.success("Saved Successfully!")
+            st.table({
+                "Field": ["Date", "Title", "Host", "Loc", "Link", "Source"],
+                "Value": row
             })
-
-        except Exception as e:
-            st.error("⚠️ Something went wrong. Please try another link.")
-
