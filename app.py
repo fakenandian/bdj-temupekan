@@ -1,26 +1,22 @@
 import streamlit as st
+import re
+import json
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# Build credentials directly from secrets
+
+# ---------- GOOGLE AUTH FROM STREAMLIT SECRETS ----------
 credentials = service_account.Credentials.from_service_account_info(
     dict(st.secrets["google"])
 )
 
-
-# ===================== EDIT THESE =====================
-SERVICE_ACCOUNT_FILE = "bdj-events-c7fce9e830db.json"
 SPREADSHEET_ID = "1FNotGZKUXw3iU6qaqKyadRaQMYSQr65KSIonlwH-CZE"
 SHEET_NAME = "Sheet1"
-# ======================================================
 
-
-# ---------- GOOGLE SHEETS CONNECTION ----------
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-creds = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES
-)
-service = build("sheets", "v4", credentials=creds)
+service = build("sheets", "v4", credentials=credentials)
 sheet = service.spreadsheets()
 
 
@@ -29,7 +25,9 @@ st.markdown("""
 <style>
 .stApp { background-color: #D84565; }
 
-h1 { color:#D63384 !important; }
+h1, h1 span {
+    color:white !important;
+}
 
 .bdj-card {
     background:white;
@@ -43,10 +41,6 @@ h1 { color:#D63384 !important; }
     background:#D84565!important;
     color:white!important;
     border-radius:12px!important;
-}
-
-.pink-button button:hover{
-    background:#BDE040!important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -129,11 +123,10 @@ def extract_event_title(caption):
 def get_instagram_data(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(url, headers=headers)
-    soup = BeautifulSoup(res.text, "html.parser")
 
     caption = ""
     m = re.search(
-        r'"edge_media_to_caption":\{"edges":\[\{"node":\{"text":"(.*?)"\}\}\]\}',
+        r'"edge_media_to_caption":\{"edges":$begin:math:display$\\\{\"node\"\:\\\{\"text\"\:\"\(\.\*\?\)\"\\\}\\\}$end:math:display$\}',
         res.text, re.S
     )
     if m:
@@ -141,7 +134,6 @@ def get_instagram_data(url):
 
     event_date = extract_event_date(caption)
     event_title = extract_event_title(caption)
-
     handles = re.findall(r'@[\w.]+', caption)
     penyelenggara = ", ".join(sorted(set(handles))) if handles else ""
 
@@ -180,34 +172,6 @@ def append_to_sheet(row):
 
 
 # ---------- UI ----------
-import streamlit as st
-
-# App background + white title
-st.markdown("""
-<style>
-.stApp {
-    background-color: #D84565;
-}
-
-/* Make the page title white */
-h1 {
-    color: white !important;
-}
-</style>
-""", unsafe_allow_html=True)
-st.markdown("""
-<style>
-.stApp {
-    background-color: #D84565;
-}
-
-/* Force-override Streamlit title color */
-h1, h1 span, .st-emotion-cache-10trblm, .st-emotion-cache-1v0mbdj {
-    color: white !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 st.title("🩷 Bertemu Djakarta Temu Pekan")
 
 st.markdown('<div class="bdj-card">', unsafe_allow_html=True)
@@ -219,10 +183,7 @@ clicked = st.button("Extract & Save to Sheet ✨")
 st.markdown('</div>', unsafe_allow_html=True)
 
 
-
-
 if clicked:
-
     if not url:
         st.warning("Masukin link dulu ya 🌷")
     else:
@@ -230,7 +191,7 @@ if clicked:
             row = get_instagram_data(url)
             append_to_sheet(row)
 
-            st.success("💗 Success! Added to Google Sheet. Don't forget to re-check!!")
+            st.success("💗 Success! Added to Google Sheet.")
             st.write({
                 "Event Date": row[0],
                 "Event Title": row[1],
