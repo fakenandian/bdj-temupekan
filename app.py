@@ -124,16 +124,25 @@ def get_instagram_data(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(url, headers=headers)
 
-    caption = ""
-    m = re.search(
-        r'"edge_media_to_caption":\{"edges":$begin:math:display$\\\{\"node\"\:\\\{\"text\"\:\"\(\.\*\?\)\"\\\}\\\}$end:math:display$\}',
-        res.text, re.S
-    )
-    if m:
-        caption = m.group(1).encode("utf-8").decode("unicode_escape")
+    # --- get JSON blob ---
+    soup = BeautifulSoup(res.text, "html.parser")
+    script = soup.find("script", text=re.compile("window\._sharedData"))
 
+    if not script:
+        caption = ""
+    else:
+        raw_json = script.string.split(" = ",1)[1].rstrip(";")
+        data = json.loads(raw_json)
+
+        try:
+            caption = data["entry_data"]["PostPage"][0]["graphql"]["shortcode_media"]["edge_media_to_caption"]["edges"][0]["node"]["text"]
+        except Exception:
+            caption = ""
+
+    # --- now reuse your existing extractors ---
     event_date = extract_event_date(caption)
     event_title = extract_event_title(caption)
+
     handles = re.findall(r'@[\w.]+', caption)
     penyelenggara = ", ".join(sorted(set(handles))) if handles else ""
 
