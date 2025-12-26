@@ -1,0 +1,196 @@
+import re
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+import streamlit as st
+
+# ---------- PINK THEME CSS ----------
+st.markdown("""
+    <style>
+    body {
+        background-color: #D84565;
+    }
+
+    .stApp {
+        background-color: #D84565;
+    }
+
+    header {visibility: hidden;}
+
+    h1 {
+        color: #0084C0 !important;
+        font-family: 'Helvetica Neue', sans-serif;
+    }
+
+    .bdj-card {
+        background: white;
+        padding: 18px;
+        border-radius: 18px;
+        box-shadow: 0px 4px 12px rgba(214, 51, 132, 0.18);
+        border: 1px solid #FFD1E8;
+    }
+
+    .pink-button button {
+        background-color: #FF6FAF !important;
+        color: white !important;
+        border-radius: 12px !important;
+        border: none;
+    }
+
+    .pink-button button:hover {
+        background-color: #FF4FA0 !important;
+    }
+
+    </style>
+""", unsafe_allow_html=True)
+
+
+
+# ---- DATE FUNCTION ----
+def extract_event_date(caption):
+    month_map = {
+        "jan": "01","january": "01",
+        "feb": "02","february": "02","februari": "02",
+        "mar": "03","march": "03","maret": "03",
+        "apr": "04","april": "04",
+        "may": "05","mei": "05",
+        "jun": "06","june": "06",
+        "jul": "07","july": "07",
+        "aug": "08","august":"08","agustus":"08",
+        "sep": "09","september":"09",
+        "oct": "10","october":"10","oktober":"10",
+        "nov": "11","november":"11",
+        "dec": "12","december":"12","desember":"12",
+    }
+
+    caption = caption.lower()
+    patterns = [
+        r"(\d{1,2})\s+([a-z]+)\s+(\d{2,4})",
+        r"(\d{1,2})\s+([a-z]+)",
+        r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})"
+    ]
+
+    for pat in patterns:
+        m = re.search(pat, caption)
+        if not m:
+            continue
+
+        g = m.groups()
+
+        if len(g) == 3 and g[1].isalpha():
+            day = int(g[0])
+            month = month_map.get(g[1][:3], "01")
+            year = int(g[2])
+        elif len(g) == 2 and g[1].isalpha():
+            day = int(g[0])
+            month = month_map.get(g[1][:3], "01")
+            year = datetime.today().year
+        else:
+            day = int(g[0])
+            month = int(g[1])
+            year = int(g[2]) if len(g[2]) == 4 else 2000 + int(g[2])
+
+        return f"{year:04d}-{month}-{day:02d}"
+
+    return ""
+
+
+# ---- TITLE FUNCTION ----
+def extract_event_title(caption):
+    lines = [l.strip() for l in caption.split("\n") if l.strip()]
+
+    for l in lines:
+        if re.search(r'\b(title|tema|theme)\b', l, re.IGNORECASE):
+            return re.sub(r'(?i)\b(title|tema|theme)\b[:\-–]*', '', l).strip()
+
+    for l in lines:
+        m = re.search(r'\*\*(.+?)\*\*', l)
+        if m:
+            return m.group(1).strip()
+
+    for l in lines:
+        if l.isupper() and 4 <= len(l) <= 70:
+            return l
+
+    for l in lines:
+        if not l.startswith("#") and "like" not in l.lower():
+            return l
+
+    return ""
+
+
+# ---- IG SCRAPER ----
+def get_instagram_data(url):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    res = requests.get(url, headers=headers)
+    soup = BeautifulSoup(res.text, "html.parser")
+
+    caption = ""
+    m = re.search(
+        r'"edge_media_to_caption":\{"edges":\[\{"node":\{"text":"(.*?)"\}\}\]\}',
+        res.text, re.S,
+    )
+    if m:
+        caption = m.group(1).encode("utf-8").decode("unicode_escape")
+
+    event_date = extract_event_date(caption)
+    event_title = extract_event_title(caption)
+
+    handles = re.findall(r'@[\w.]+', caption)
+    penyelenggara = ", ".join(sorted(set(handles))) if handles else ""
+
+    location = ""
+    for l in caption.split("\n"):
+        if "📍" in l:
+            location = l.replace("📍","").strip()
+            break
+
+    registration_link = ""
+    if re.search(r'\bfree\b', caption, re.IGNORECASE):
+        registration_link = "Free"
+    else:
+        link = re.search(r'(https?://[^\s]+)', caption)
+        if link:
+            registration_link = link.group(1)
+
+    return {
+        "Event Date": event_date,
+        "Event Title": event_title,
+        "Penyelenggara": penyelenggara,
+        "Location": location,
+        "Registration Link": registration_link,
+        "Source": url
+    }
+
+
+
+# ---------- UI ----------
+st.title("🩷 BDJ Event Extractor")
+
+st.markdown('<div class="bdj-card">', unsafe_allow_html=True)
+
+url = st.text_input("Paste Instagram link here 👇")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+col1, col2 = st.columns([1,3])
+
+with col1:
+    with st.container():
+        st.markdown('<div class="pink-button">', unsafe_allow_html=True)
+        clicked = st.button("Extract Event ✨")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+if clicked:
+    if not url:
+        st.warning("Masukin link dulu ya 🌷")
+    else:
+        data = get_instagram_data(url)
+
+        st.markdown('<div class="bdj-card">', unsafe_allow_html=True)
+        st.success("Event data found 💗")
+
+        st.write(data)
+
+        st.markdown('</div>', unsafe_allow_html=True)
+    
