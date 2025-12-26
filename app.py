@@ -3,7 +3,7 @@ import json
 from google.oauth2 import service_account
 
 # Read JSON string from secrets
-creds_json = st.secrets["google"]["credentials"]
+creds_json = st.secrets["google"]
 
 # Convert JSON string → Python dict
 creds_dict = json.loads(creds_json)
