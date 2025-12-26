@@ -195,6 +195,18 @@ h1 {
 }
 </style>
 """, unsafe_allow_html=True)
+st.markdown("""
+<style>
+.stApp {
+    background-color: #FFE6F2;
+}
+
+/* Force-override Streamlit title color */
+h1, h1 span, .st-emotion-cache-10trblm, .st-emotion-cache-1v0mbdj {
+    color: white !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 st.title("🩷 Bertemu Djakarta Temu Pekan")
 
