@@ -180,7 +180,23 @@ def append_to_sheet(row):
 
 
 # ---------- UI ----------
-st.title("🩷 BDJ Event Extractor (Auto-Sheet)")
+import streamlit as st
+
+# App background + white title
+st.markdown("""
+<style>
+.stApp {
+    background-color: #D84565;
+}
+
+/* Make the page title white */
+h1 {
+    color: white !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🩷 Bertemu Djakarta Temu Pekan")
 
 st.markdown('<div class="bdj-card">', unsafe_allow_html=True)
 url = st.text_input("Paste Instagram link here 👇")
@@ -189,6 +205,8 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div class="pink-button">', unsafe_allow_html=True)
 clicked = st.button("Extract & Save to Sheet ✨")
 st.markdown('</div>', unsafe_allow_html=True)
+
+
 
 
 if clicked:
