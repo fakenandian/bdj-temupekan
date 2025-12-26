@@ -3,6 +3,9 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 import streamlit as st
+import json
+
+creds= json.load(st.secrets["google"]["credentials"])
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
