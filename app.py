@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 # ---------- GOOGLE AUTH ----------
 def get_g_service():
     try:
-        # Streamlit secrets must be in 'TOML' format
+        # Streamlit secrets must be in TOML format
         creds_info = dict(st.secrets["google"])
         credentials = service_account.Credentials.from_service_account_info(creds_info)
         return build("sheets", "v4", credentials=credentials)
@@ -18,17 +18,17 @@ def get_g_service():
 SPREADSHEET_ID = "1FNotGZKUXw3iU6qaqKyadRaQMYSQr65KSIonlwH-CZE"
 SHEET_NAME = "Sheet1"
 
-# ---------- IMPROVED DATE RANGE PARSER ----------
+# ---------- ADVANCED PARSING LOGIC ----------
+
 def extract_date(caption):
     month_map = {
         "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
         "jul": "07", "aug": "08", "sep": "09", "oct": "10", "nov": "11", "dec": "12",
-        "mei": "05", "agu": "08", "okt": "10", "des": "12", "maret": "03"
+        "mei": "05", "agu": "08", "okt": "10", "des": "12", "maret": "03", "agustus": "08"
     }
     caption = caption.lower()
     
-    # Matches "25-27 Oct" or "25 - 27 Oct" or "25 Oct"
-    # Group 1: Start Day, Group 2: End Day (optional), Group 3: Month Name
+    # Matches "25-27 Oct" or "25 Oct"
     range_pattern = r"(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?\s+([a-z]{3,10})"
     
     match = re.search(range_pattern, caption)
@@ -42,64 +42,105 @@ def extract_date(caption):
     # Fallback for DD/MM/YYYY
     simple_match = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", caption)
     if simple_match:
-        return f"{simple_match.group(3)}-{simple_match.group(2).zfill(2)}-{simple_match.group(1).zfill(2)}"
+        y = simple_match.group(3)
+        if len(y) == 2: y = f"20{y}"
+        return f"{y}-{simple_match.group(2).zfill(2)}-{simple_match.group(1).zfill(2)}"
         
     return ""
 
 def parse_all_fields(caption, url):
     lines = [l.strip() for l in caption.split("\n") if l.strip()]
     
-    # 1. Date
+    # 1. DATE
     event_date = extract_date(caption)
     
-    # 2. Title (Take first line that isn't an emoji or hashtag)
-    event_title = "Untitled"
-    for l in lines:
-        if not l.startswith("#") and len(l) > 5:
-            event_title = l[:100]
-            break
+    # 2. TITLE (Prioritize Bold **text**)
+    event_title = "Untitled Event"
+    bold_match = re.search(r"\*\*(.*?)\*\*", caption)
+    if bold_match:
+        event_title = bold_match.group(1).strip()
+    else:
+        # Fallback: Find first line that isn't a hashtag or emoji-only
+        for l in lines:
+            clean_l = re.sub(r'[^\w\s]', '', l).strip()
+            if not l.startswith("#") and len(clean_l) > 3:
+                event_title = l[:100]
+                break
 
-    # 3. Penyelenggara
+    # 3. PENYELENGGARA (@mentions)
     handles = re.findall(r'@[\w.]+', caption)
-    penyelenggara = ", ".join(set(handles)) if handles else "-"
+    penyelenggara = ", ".join(sorted(set(handles))) if handles else "-"
 
-    # 4. Location
+    # 4. LOCATION (Looking for markers)
     location = "-"
     for l in lines:
-        if any(emoji in l for emoji in ["📍", "🏛️", "🏢"]):
-            location = re.sub(r'[📍🏛️🏢]', '', l).strip()
+        if any(mark in l.lower() for mark in ["📍", "location:", "lokasi:", "at ", "place:"]):
+            location = re.sub(r'(?i)location:|lokasi:|at |📍', '', l).strip()
             break
 
-    # 5. Link
-    link_match = re.search(r'(https?://[^\s]+)', caption)
-    reg_link = link_match.group(1) if link_match else "-"
+    # 5. REGISTRATION LINK (Keyword-aware)
+    reg_link = "-"
+    # Search for link near keywords
+    for l in lines:
+        if any(k in l.lower() for k in ["link", "htm", "daftar", "free", "regis", "tiket", "ticket"]):
+            link_search = re.search(r'(https?://[^\s]+)', l)
+            if link_search:
+                reg_link = link_search.group(1)
+                break
+    
+    # Final fallback if no keyword match
+    if reg_link == "-":
+        any_link = re.search(r'(https?://[^\s]+)', caption)
+        if any_link:
+            reg_link = any_link.group(1)
 
     return [event_date, event_title, penyelenggara, location, reg_link, url]
 
-# ---------- UI & EXECUTION ----------
-st.set_page_config(page_title="Data Parser", page_icon="📝")
-st.title("💗 Bertemu Djakarta Parser")
+# ---------- STREAMLIT UI ----------
+st.set_page_config(page_title="Event Parser", page_icon="💗")
 
-caption_input = st.text_area("Paste Caption Here", height=200)
-url_input = st.text_input("Source URL")
+st.markdown("""
+<style>
+    .stApp { background-color: #D84565; color: white; }
+    .main-card { background: white; padding: 20px; border-radius: 15px; color: #333; }
+    .stButton>button { background-color: #D84565 !important; color: white !important; width: 100%; border-radius: 10px; }
+</style>
+""", unsafe_allow_html=True)
 
-if st.button("Save to Google Sheets ✨"):
-    if caption_input and url_input:
+st.title("💗 Bertemu Djakarta: Event Parser")
+
+with st.container():
+    st.markdown('<div class="main-card">', unsafe_allow_html=True)
+    caption_input = st.text_area("1. Paste Instagram Caption here 👇", height=250)
+    url_input = st.text_input("2. Source URL 👇")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.write("---")
+
+if st.button("🚀 Process & Save to Sheet"):
+    if not caption_input or not url_input:
+        st.warning("Please fill in both the caption and the source URL! 🌸")
+    else:
         service = get_g_service()
         if service:
-            row = parse_all_fields(caption_input, url_input)
-            
             try:
-                service.spreadsheets().values().append(
-                    spreadsheetId=SPREADSHEET_ID,
-                    range=f"{SHEET_NAME}!A:F",
-                    valueInputOption="USER_ENTERED",
-                    body={"values": [row]}
-                ).execute()
+                with st.spinner('Parsing data...'):
+                    row_data = parse_all_fields(caption_input, url_input)
+                    
+                    # Append to Sheets
+                    service.spreadsheets().values().append(
+                        spreadsheetId=SPREADSHEET_ID,
+                        range=f"{SHEET_NAME}!A:F",
+                        valueInputOption="USER_ENTERED", # Better for formatting dates/links
+                        body={"values": [row_data]}
+                    ).execute()
+                    
+                st.success("✅ Added to Google Sheet successfully!")
                 
-                st.success("Data Saved!")
-                st.table({"Date": row[0], "Title": row[1], "Host": row[2], "Loc": row[3], "Link": row[4]})
+                # Display Summary
+                st.table({
+                    "Field": ["Event Date", "Title", "Host", "Location", "Reg Link", "Source"],
+                    "Parsed Value": row_data
+                })
             except Exception as e:
-                st.error(f"Sheet Error: {e}")
-    else:
-        st.warning("Please fill both fields.")
+                st.error(f"Error saving to Sheet: {e}")
