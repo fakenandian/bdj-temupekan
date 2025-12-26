@@ -2,13 +2,12 @@ import streamlit as st
 import re
 import json
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 
-# ---------- GOOGLE AUTH FROM STREAMLIT SECRETS ----------
+# ---------- GOOGLE AUTH ----------
 credentials = service_account.Credentials.from_service_account_info(
     dict(st.secrets["google"])
 )
@@ -44,6 +43,7 @@ h1, h1 span {
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 # ---------- DATE ----------
@@ -95,6 +95,7 @@ def extract_event_date(caption):
     return ""
 
 
+
 # ---------- TITLE ----------
 def extract_event_title(caption):
     lines = [l.strip() for l in caption.split("\n") if l.strip()]
@@ -119,29 +120,32 @@ def extract_event_title(caption):
     return ""
 
 
+
 # ---------- SCRAPE IG ----------
 def get_instagram_data(url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    res = requests.get(url, headers=headers)
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
 
-    # parse caption from Instagram's JSON
-    soup = BeautifulSoup(res.text, "html.parser")
-    script = soup.find("script", text=re.compile("window\\._sharedData"))
+    res = requests.get(url, headers=headers)
 
     caption = ""
 
-    if script:
-        raw_json = script.string.split(" = ", 1)[1].rstrip(";")
+    # Instagram now stores caption in ld+json script
+    match = re.search(
+        r'<script type="application/ld\+json">(.*?)</script>',
+        res.text,
+        re.S
+    )
+
+    if match:
         try:
-            data = json.loads(raw_json)
-            media = data["entry_data"]["PostPage"][0]["graphql"]["shortcode_media"]
-            edges = media.get("edge_media_to_caption", {}).get("edges", [])
-            if edges:
-                caption = edges[0]["node"].get("text", "")
-        except Exception:
+            data = json.loads(match.group(1))
+            caption = data.get("caption", "")
+        except:
             caption = ""
 
-    # now extract fields
+    # ---------- extract fields ----------
     event_date = extract_event_date(caption)
     event_title = extract_event_title(caption)
 
@@ -151,16 +155,13 @@ def get_instagram_data(url):
     location = ""
     for l in caption.split("\n"):
         if "📍" in l:
-            location = l.replace("📍", "").strip()
+            location = l.replace("📍","").strip()
             break
 
     registration_link = ""
-    if re.search(r'\bfree\b', caption, re.IGNORECASE):
-        registration_link = "Free"
-    else:
-        link = re.search(r'(https?://[^\s]+)', caption)
-        if link:
-            registration_link = link.group(1)
+    link = re.search(r'(https?://[^\s]+)', caption)
+    if link:
+        registration_link = link.group(1)
 
     return [
         event_date,
@@ -173,7 +174,7 @@ def get_instagram_data(url):
 
 
 
-# ---------- WRITE TO SHEET ----------
+# ---------- SAVE ----------
 def append_to_sheet(row):
     sheet.values().append(
         spreadsheetId=SPREADSHEET_ID,
@@ -181,6 +182,7 @@ def append_to_sheet(row):
         valueInputOption="RAW",
         body={"values":[row]},
     ).execute()
+
 
 
 # ---------- UI ----------
@@ -204,6 +206,7 @@ if clicked:
             append_to_sheet(row)
 
             st.success("💗 Success! Added to Google Sheet.")
+
             st.write({
                 "Event Date": row[0],
                 "Event Title": row[1],
@@ -214,4 +217,5 @@ if clicked:
             })
 
         except Exception as e:
-            st.error(f"⚠️ Something went wrong: {e}")
+            st.error("⚠️ Something went wrong. Please try another link.")
+
