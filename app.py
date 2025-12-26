@@ -1,18 +1,11 @@
 import streamlit as st
-import json
-from google.oauth2 import service_account
-
-# Read JSON string from secrets
-creds_json = st.secrets["google"]
-
-# Convert JSON string → Python dict
-creds_dict = json.loads(creds_json)
-
-# Build credentials object
-credentials = service_account.Credentials.from_service_account_info(creds_dict)
-
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+
+# Build credentials directly from secrets
+credentials = service_account.Credentials.from_service_account_info(
+    dict(st.secrets["google"])
+)
 
 
 # ===================== EDIT THESE =====================
