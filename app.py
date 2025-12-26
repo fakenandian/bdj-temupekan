@@ -124,22 +124,24 @@ def get_instagram_data(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(url, headers=headers)
 
-    # --- get JSON blob ---
+    # parse caption from Instagram's JSON
     soup = BeautifulSoup(res.text, "html.parser")
-    script = soup.find("script", text=re.compile("window\._sharedData"))
+    script = soup.find("script", text=re.compile("window\\._sharedData"))
 
-    if not script:
-        caption = ""
-    else:
-        raw_json = script.string.split(" = ",1)[1].rstrip(";")
-        data = json.loads(raw_json)
+    caption = ""
 
+    if script:
+        raw_json = script.string.split(" = ", 1)[1].rstrip(";")
         try:
-            caption = data["entry_data"]["PostPage"][0]["graphql"]["shortcode_media"]["edge_media_to_caption"]["edges"][0]["node"]["text"]
+            data = json.loads(raw_json)
+            media = data["entry_data"]["PostPage"][0]["graphql"]["shortcode_media"]
+            edges = media.get("edge_media_to_caption", {}).get("edges", [])
+            if edges:
+                caption = edges[0]["node"].get("text", "")
         except Exception:
             caption = ""
 
-    # --- now reuse your existing extractors ---
+    # now extract fields
     event_date = extract_event_date(caption)
     event_title = extract_event_title(caption)
 
@@ -149,7 +151,7 @@ def get_instagram_data(url):
     location = ""
     for l in caption.split("\n"):
         if "📍" in l:
-            location = l.replace("📍","").strip()
+            location = l.replace("📍", "").strip()
             break
 
     registration_link = ""
@@ -168,6 +170,7 @@ def get_instagram_data(url):
         registration_link,
         url
     ]
+
 
 
 # ---------- WRITE TO SHEET ----------
