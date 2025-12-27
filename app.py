@@ -79,7 +79,7 @@ def parse_all_fields(caption, url):
 
     penyelenggara = ", ".join(sorted(found_hosts)) if found_hosts else "-"
 
-    # 4. LOCATION
+   # 4. LOCATION
     location = "-"
     for l in lines:
         if any(mark in l.lower() for mark in ["📍", "location:", "lokasi:", "at ", "place:"]):
@@ -142,7 +142,7 @@ if st.button("🚀 Process & Save to Sheet"):
                 
                 st.success("✅ Added to Google Sheet! Thankiees!🌸🌸🌸")
                 st.table({
-                    "Field": ["Date", "Title", "Host", "Location", "Reg/HTM", "Source"],
+                    "Field": ["Date", "Title", "Host/Collab", "Location", "Reg/HTM", "Source"],
                     "Value": row_data
                 })
             except Exception as e:
