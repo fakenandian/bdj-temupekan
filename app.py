@@ -1,6 +1,6 @@
 import streamlit as st
 import re
-import instaloader
+import requests
 from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -20,22 +20,39 @@ SHEET_NAME = "Sheet1"
 
 # ---------- AUTO-FETCH LOGIC ----------
 def fetch_ig_caption(url):
-    L = instaloader.Instaloader()
+    """
+    Tries to get caption using a specialized user-agent to mimic a browser.
+    If Instagram blocks this, it returns None.
+    """
+    # Cleaning URL to get the JSON data directly if possible
+    json_url = f"{url.rstrip('/')}/?__a=1&__d=dis"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+    }
     try:
-        # Extract shortcode from URL
-        # Pattern handles /p/SHORTCODE/ or /reels/SHORTCODE/
-        shortcode_match = re.search(r"/(?:p|reels|tv)/([^/]+)/", url)
-        if not shortcode_match:
-            return None
-        
-        shortcode = shortcode_match.group(1)
-        post = instaloader.Post.from_shortcode(L.context, shortcode)
-        return post.caption, post.owner_username
-    except Exception as e:
-        st.warning(f"Auto-fetch failed. Usually happens if IG blocks the server. {e}")
-        return None, None
+        response = requests.get(json_url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            caption = data['items'][0]['caption']['text']
+            owner = data['items'][0]['user']['username']
+            return caption, owner
+    except:
+        # Fallback to standard HTML scraping if JSON fails
+        try:
+            res = requests.get(url, headers=headers, timeout=10)
+            # Find caption in metadata
+            cap_match = re.search(r'"edge_media_to_caption":\{"edges":\[\{"node":\{"text":"(.*?)"\}\}\]\}', res.text)
+            handle_match = re.search(r'"owner":\{"id":"\d+","username":"(.*?)"\}', res.text)
+            
+            caption = cap_match.group(1).encode().decode('unicode_escape') if cap_match else None
+            owner = handle_match.group(1) if handle_match else None
+            return caption, owner
+        except:
+            return None, None
+    return None, None
 
-# ---------- UPDATED PARSING ----------
+# ---------- PARSING LOGIC ----------
+
 def extract_date(caption):
     month_map = {
         "jan": "01", "feb": "02", "mar": "03", "apr": "04", "may": "05", "jun": "06",
@@ -49,69 +66,70 @@ def extract_date(caption):
         day = int(match.group(1))
         month_str = match.group(3)[:3]
         month = month_map.get(month_str, "01")
-        year = datetime.today().year
-        return f"{year}-{month}-{day:02d}"
+        return f"{datetime.today().year}-{month}-{day:02d}"
     return ""
 
-def parse_all_fields(caption, url, owner_handle=None):
+def parse_all_fields(caption, url, owner_handle):
     lines = [l.strip() for l in caption.split("\n") if l.strip()]
     
     # 1. DATE
     event_date = extract_date(caption)
     
     # 2. TITLE (Strict: Bold Only)
-    event_title = "" 
+    event_title = ""
     bold_match = re.search(r"\*\*(.*?)\*\*", caption)
     if bold_match:
         event_title = bold_match.group(1).strip()
 
-    # 3. PENYELENGGARA (Handle + @Mentions + Collab)
+    # 3. PENYELENGGARA (Host + @Mentions + Collabs)
     found_hosts = set()
     if owner_handle:
         found_hosts.add(f"@{owner_handle}")
     
-    # @mentions
-    mentions = re.findall(r'@([\w.]+)', caption)
-    for m in mentions:
-        found_hosts.add(f"@{m}")
+    # URL Handle extraction fallback
+    url_handle = re.search(r"instagram\.com/([^/]+)", url)
+    if url_handle and url_handle.group(1) not in ['p', 'reels', 'tv']:
+        found_hosts.add(f"@{url_handle.group(1)}")
 
-    # X Collaborations
-    collab_pattern = r"([@\w\s]+)\s+[xX]\s+([@\w\s]+)"
-    collab_matches = re.findall(collab_pattern, caption)
+    # Mentions & Collabs
+    mentions = re.findall(r'@([\w.]+)', caption)
+    found_hosts.update([f"@{m}" for m in mentions])
+    
+    collab_matches = re.findall(r"([@\w\s]+)\s+[xX]\s+([@\w\s]+)", caption)
     for match in collab_matches:
         for name in match:
-            clean_name = name.strip()
-            if clean_name and len(clean_name) > 2:
-                found_hosts.add(clean_name)
+            n = name.strip()
+            if len(n) > 2: found_hosts.add(n)
 
-    penyelenggara = ", ".join(sorted(found_hosts)) if found_hosts else "-"
+    penyelenggara = ", ".join(sorted(found_hosts))
 
-    # 4. LOCATION (Enhanced)
-    location = "-"
-    loc_keywords = ["📍", "location:", "lokasi:", "at ", "place:", "area:", "tempat:"]
+    # 4. LOCATION (Expanded keywords)
+    location = ""
+    loc_keys = ["📍", "location:", "lokasi:", "area:", "at:", "place:", "venue:"]
     for l in lines:
-        if any(mark in l.lower() for mark in loc_keywords):
-            location = re.sub(r'(?i)location:|lokasi:|area:|tempat:|at |📍', '', l).strip()
+        if any(k in l.lower() for k in loc_keys):
+            location = re.sub(r'(?i)location:|lokasi:|area:|at:|place:|venue:|📍', '', l).strip()
             break
 
     # 5. REGISTRATION / FREE
     reg_link = "-"
-    if any(free_word in caption.upper() for free_word in ["FREE", "GRATIS", "RP 0", "NO FEE"]):
+    if any(f in caption.upper() for f in ["FREE", "GRATIS", "HTM: 0", "RP 0"]):
         reg_link = "FREE"
 
-    keyword_pattern = r"(?i)(?:link|htm|daftar|regis|tiket|ticket|pendaftaran|gform|bit\.ly|form).*?(https?://[^\s]+)"
-    link_match = re.search(keyword_pattern, caption, re.DOTALL)
+    # Proximity search for link near registration keywords
+    kw_pattern = r"(?i)(?:link|htm|daftar|regis|tiket|ticket|pendaftaran|bit\.ly|form).*?(https?://[^\s]+)"
+    link_match = re.search(kw_pattern, caption, re.DOTALL)
     
     if link_match:
         reg_link = link_match.group(1)
-    elif reg_link == "-":
-        any_link = re.search(r'(https?://[^\s]+)', caption)
-        if any_link:
-            reg_link = any_link.group(1)
+    else:
+        # Fallback to any link
+        any_l = re.search(r'(https?://[^\s]+)', caption)
+        if any_l: reg_link = any_l.group(1)
 
     return [event_date, event_title, penyelenggara, location, reg_link, url]
 
-# ---------- UI ----------
+# ---------- STREAMLIT UI ----------
 st.set_page_config(page_title="Temu Pekan", page_icon="💗")
 
 st.markdown("""
@@ -121,43 +139,30 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💗 Temu Pekan Bertemu Djakarta")
+st.title("💗 Bertemu Djakarta Auto-Parser")
 
 with st.container():
     st.markdown('<div class="main-card">', unsafe_allow_html=True)
-    url_input = st.text_input("Paste Instagram URL only 👇 (Wait for it to fetch)")
+    url_input = st.text_input("Paste Instagram URL 👇")
     st.markdown('</div>', unsafe_allow_html=True)
 
 if st.button("🚀 Fetch & Save to Sheet"):
-    if not url_input:
-        st.warning("Input URL first! 🌸")
-    else:
-        with st.spinner("Fetching data from Instagram..."):
+    if url_input:
+        with st.spinner("Trying to fetch from Instagram..."):
             caption, owner = fetch_ig_caption(url_input)
             
         if not caption:
-            st.error("Could not fetch caption automatically. Please use a Manual Paste tab or try again.")
-            # Optional: provide a manual text area as fallback here
-            manual_caption = st.text_area("Paste caption manually as fallback:")
-            if manual_caption:
-                caption = manual_caption
-
+            st.error("Instagram is blocking the automated request. 🚧")
+            # Creating a manual fallback so you can still work
+            caption = st.text_area("Please paste the caption manually to parse:")
+        
         if caption:
             service = get_g_service()
             if service:
-                try:
-                    row_data = parse_all_fields(caption, url_input, owner)
-                    service.spreadsheets().values().append(
-                        spreadsheetId=SPREADSHEET_ID,
-                        range=f"{SHEET_NAME}!A:F",
-                        valueInputOption="USER_ENTERED",
-                        body={"values": [row_data]}
-                    ).execute()
-                    
-                    st.success("✅ Added to Google Sheet!")
-                    st.table({
-                        "Field": ["Date", "Title", "Host/Collab", "Location", "Reg/HTM", "Source"],
-                        "Value": row_data
-                    })
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                row = parse_all_fields(caption, url_input, owner)
+                service.spreadsheets().values().append(
+                    spreadsheetId=SPREADSHEET_ID, range=f"{SHEET_NAME}!A:F",
+                    valueInputOption="USER_ENTERED", body={"values": [row]}
+                ).execute()
+                st.success("✅ Saved!")
+                st.table({"Date": row[0], "Title": row[1], "Host": row[2], "Loc": row[3], "Reg": row[4]})
