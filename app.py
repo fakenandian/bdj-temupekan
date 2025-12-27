@@ -108,7 +108,7 @@ def parse_all_fields(caption, url, owner_handle):
         reg_link = "FREE"
 
     # Regex for links with or without http://
-    url_pattern = r"((?:https?://|www\.)[^\s]+|(?:bit\.ly|linktr\.ee|forms\.gle|tinyurl\.com|linkin\.bio)/[^\s]+)"
+    url_pattern = r"((?: https?://|www\.)[^\s]+|(?: bit\.ly|linktr\.ee|forms\.gle|tinyurl\.com|linkin\.bio)/[^\s]+)"
     
     kw_pattern = rf"(?i)(?:link|htm|daftar|regis|tiket|ticket|pendaftaran).*?{url_pattern}"
     link_match = re.search(kw_pattern, caption, re.DOTALL)
