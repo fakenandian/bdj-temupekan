@@ -53,9 +53,31 @@ def parse_all_fields(caption, url):
                 event_title = l[:100]
                 break
 
-    # 3. PENYELENGGARA
-    handles = re.findall(r'@[\w.]+', caption)
-    penyelenggara = ", ".join(sorted(set(handles))) if handles else "-"
+    # 3. PENYELENGGARA (Enhanced Collaboration Logic)
+    found_hosts = set()
+    
+    # A. Extract mentions (@name)
+    mentions = re.findall(r'@([\w.]+)', caption)
+    for m in mentions:
+        found_hosts.add(f"@{m}")
+
+    # B. Extract Collaborations (Name X Name)
+    # This looks for CapitalizedWords or @names separated by ' X ' or ' x '
+    collab_pattern = r"([@\w\s]+)\s+[xX]\s+([@\w\s]+)"
+    collab_matches = re.findall(collab_pattern, caption)
+    for match in collab_matches:
+        for name in match:
+            clean_name = name.strip()
+            if clean_name and len(clean_name) > 2:
+                found_hosts.add(clean_name)
+
+    # C. Extract Host from URL (if it's an instagram.com/handle/p/ style link)
+    # Note: Modern IG URLs often don't have the handle
+    url_handle = re.search(r"instagram\.com/([^/]+)", url)
+    if url_handle and url_handle.group(1) not in ['p', 'reels', 'tv']:
+        found_hosts.add(f"@{url_handle.group(1)}")
+
+    penyelenggara = ", ".join(sorted(found_hosts)) if found_hosts else "-"
 
     # 4. LOCATION
     location = "-"
