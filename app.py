@@ -64,11 +64,12 @@ def parse_all_fields(caption, url):
             location = re.sub(r'(?i)location:|lokasi:|at |📍', '', l).strip()
             break
 
-    # 5. REGISTRATION / PRICE LINK (COMPREHENSIVE FIX)
+    # 5. REGISTRATION / PRICE LINK 
     reg_link = "-"
     # Check for "FREE" keywords specifically first
     if any(free_word in caption.upper() for free_word in ["FREE", "GRATIS", "RP 0", "FREE ENTRY"]):
         reg_link = "FREE / No Link Needed"
+        
 
     # Now look for actual URLs associated with registration keywords
     keyword_pattern = r"(?i)(?:link|htm|daftar|regis|tiket|ticket|pendaftaran|gform|bit\.ly|form).*?(https?://[^\s]+)"
@@ -85,7 +86,7 @@ def parse_all_fields(caption, url):
     return [event_date, event_title, penyelenggara, location, reg_link, url]
 
 # ---------- STREAMLIT UI ----------
-st.set_page_config(page_title="Event Parser", page_icon="💗")
+st.set_page_config(page_title="Temu Pekan", page_icon="💗")
 
 st.markdown("""
 <style>
@@ -117,7 +118,7 @@ if st.button("🚀 Process & Save to Sheet"):
                     body={"values": [row_data]}
                 ).execute()
                 
-                st.success("✅ Added to Google Sheet!")
+                st.success("✅ Added to Google Sheet! Thankiees!🌸🌸🌸")
                 st.table({
                     "Field": ["Date", "Title", "Host", "Location", "Reg/HTM", "Source"],
                     "Value": row_data
