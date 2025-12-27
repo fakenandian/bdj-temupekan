@@ -20,36 +20,28 @@ SHEET_NAME = "Sheet1"
 
 # ---------- AUTO-FETCH LOGIC ----------
 def fetch_ig_caption(url):
-    """
-    Tries to get caption using a specialized user-agent to mimic a browser.
-    If Instagram blocks this, it returns None.
-    """
-    # Cleaning URL to get the JSON data directly if possible
-    json_url = f"{url.rstrip('/')}/?__a=1&__d=dis"
+    # Using the 'embed' URL is sometimes more successful for fetching metadata
+    embed_url = f"{url.rstrip('/')}/embed/captioned/"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
     }
     try:
-        response = requests.get(json_url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            caption = data['items'][0]['caption']['text']
-            owner = data['items'][0]['user']['username']
-            return caption, owner
-    except:
-        # Fallback to standard HTML scraping if JSON fails
-        try:
-            res = requests.get(url, headers=headers, timeout=10)
-            # Find caption in metadata
-            cap_match = re.search(r'"edge_media_to_caption":\{"edges":\[\{"node":\{"text":"(.*?)"\}\}\]\}', res.text)
-            handle_match = re.search(r'"owner":\{"id":"\d+","username":"(.*?)"\}', res.text)
+        res = requests.get(embed_url, headers=headers, timeout=10)
+        # 1. Try to find the Main Account (Owner) in the embed HTML
+        owner_match = re.search(r'class="UsernameText"[^>]*>([^<]+)</span>', res.text)
+        # 2. Try to find the Caption in the embed HTML
+        cap_match = re.search(r'class="CaptionText"[^>]*>(.*?)</div>', res.text, re.DOTALL)
+        
+        owner = owner_match.group(1).strip() if owner_match else None
+        caption = cap_match.group(1).encode().decode('unicode_escape') if cap_match else None
+        
+        # Clean up HTML tags if found in caption
+        if caption:
+            caption = re.sub('<[^<]+?>', '', caption)
             
-            caption = cap_match.group(1).encode().decode('unicode_escape') if cap_match else None
-            owner = handle_match.group(1) if handle_match else None
-            return caption, owner
-        except:
-            return None, None
-    return None, None
+        return caption, owner
+    except:
+        return None, None
 
 # ---------- PARSING LOGIC ----------
 
@@ -81,29 +73,28 @@ def parse_all_fields(caption, url, owner_handle):
     if bold_match:
         event_title = bold_match.group(1).strip()
 
-    # 3. PENYELENGGARA (Host + @Mentions + Collabs)
+    # 3. PENYELENGGARA (Main Host + @Mentions + Collabs)
     found_hosts = set()
+    
+    # Add Main Account found from Fetching
     if owner_handle:
-        found_hosts.add(f"@{owner_handle}")
+        found_hosts.add(f"@{owner_handle.replace('@','')}")
     
-    # URL Handle extraction fallback
-    url_handle = re.search(r"instagram\.com/([^/]+)", url)
-    if url_handle and url_handle.group(1) not in ['p', 'reels', 'tv']:
-        found_hosts.add(f"@{url_handle.group(1)}")
-
-    # Mentions & Collabs
+    # Add @mentions from caption (clean trailing dots/commas)
     mentions = re.findall(r'@([\w.]+)', caption)
-    found_hosts.update([f"@{m}" for m in mentions])
+    for m in mentions:
+        found_hosts.add(f"@{m.rstrip('.')}")
     
+    # Add X Collaborations
     collab_matches = re.findall(r"([@\w\s]+)\s+[xX]\s+([@\w\s]+)", caption)
     for match in collab_matches:
         for name in match:
             n = name.strip()
-            if len(n) > 2: found_hosts.add(n)
+            if len(n) > 2: found_hosts.add(n.rstrip('.'))
 
     penyelenggara = ", ".join(sorted(found_hosts))
 
-    # 4. LOCATION (Expanded keywords)
+    # 4. LOCATION
     location = ""
     loc_keys = ["📍", "location:", "lokasi:", "area:", "at:", "place:", "venue:"]
     for l in lines:
@@ -111,21 +102,22 @@ def parse_all_fields(caption, url, owner_handle):
             location = re.sub(r'(?i)location:|lokasi:|area:|at:|place:|venue:|📍', '', l).strip()
             break
 
-    # 5. REGISTRATION / FREE
+    # 5. REGISTRATION LINK (bit.ly / linktree / etc)
     reg_link = "-"
     if any(f in caption.upper() for f in ["FREE", "GRATIS", "HTM: 0", "RP 0"]):
         reg_link = "FREE"
 
-    # Proximity search for link near registration keywords
-    kw_pattern = r"(?i)(?:link|htm|daftar|regis|tiket|ticket|pendaftaran|bit\.ly|form).*?(https?://[^\s]+)"
+    # Regex for links with or without http://
+    url_pattern = r"((?:https?://|www\.)[^\s]+|(?:bit\.ly|linktr\.ee|forms\.gle|tinyurl\.com|linkin\.bio)/[^\s]+)"
+    
+    kw_pattern = rf"(?i)(?:link|htm|daftar|regis|tiket|ticket|pendaftaran).*?{url_pattern}"
     link_match = re.search(kw_pattern, caption, re.DOTALL)
     
     if link_match:
-        reg_link = link_match.group(1)
+        reg_link = link_match.group(1).rstrip('.,')
     else:
-        # Fallback to any link
-        any_l = re.search(r'(https?://[^\s]+)', caption)
-        if any_l: reg_link = any_l.group(1)
+        any_l = re.search(url_pattern, caption)
+        if any_l: reg_link = any_l.group(1).rstrip('.,')
 
     return [event_date, event_title, penyelenggara, location, reg_link, url]
 
@@ -139,22 +131,22 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💗 Bertemu Djakarta Auto-Parser")
+st.title("💗 Temu Pekan Bertemu Djakarta")
 
 with st.container():
     st.markdown('<div class="main-card">', unsafe_allow_html=True)
-    url_input = st.text_input("Paste Instagram URL 👇")
+    url_input = st.text_input("Paste Instagram URL here 👇")
     st.markdown('</div>', unsafe_allow_html=True)
 
 if st.button("🚀 Fetch & Save to Sheet"):
     if url_input:
-        with st.spinner("Trying to fetch from Instagram..."):
+        with st.spinner("Fetching main account and caption..."):
             caption, owner = fetch_ig_caption(url_input)
             
         if not caption:
-            st.error("Instagram is blocking the automated request. 🚧")
-            # Creating a manual fallback so you can still work
-            caption = st.text_area("Please paste the caption manually to parse:")
+            st.warning("Sorry. Auto-fetch limited by Instagram. Please paste manually below. 🌸")
+            owner = st.text_input("Main Account Handle (e.g. @jktinfo):")
+            caption = st.text_area("Paste caption here:")
         
         if caption:
             service = get_g_service()
@@ -164,5 +156,5 @@ if st.button("🚀 Fetch & Save to Sheet"):
                     spreadsheetId=SPREADSHEET_ID, range=f"{SHEET_NAME}!A:F",
                     valueInputOption="USER_ENTERED", body={"values": [row]}
                 ).execute()
-                st.success("✅ Saved!")
-                st.table({"Date": row[0], "Title": row[1], "Host": row[2], "Loc": row[3], "Reg": row[4]})
+                st.success("✅ Saved to Google Sheet! Have a nice day!")
+                
